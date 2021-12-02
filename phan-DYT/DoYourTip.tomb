@@ -1,0 +1,159 @@
+﻿token DYT {
+    global _addressOwner: address;
+    global _addressContract: address;
+    global _contractPaused: bool;
+    global _whitelistStorage: storage_map <address, number>;
+    global _swapStorage: storage_map <hash, number>;
+
+    property name: string = "DoYourTip";
+    property version: string = "1.0";
+    property isTransferable: bool = true;
+    property isFungible: bool = true;
+    property isBurnable: bool = true;
+    property isDivisible: bool = true;
+    property isFinite: bool = true;
+    property maxSupply: number = 1500000000000000000000000;
+    property addressOwner: address = _addressOwner;
+    property decimals:number = 18;
+    property symbol:string = $THIS_SYMBOL;
+    property owner:address = _addressOwner;
+
+    // libraries import
+    import Runtime;
+    import Token;
+    import Map;
+    import Time;
+    import UID;
+    import Market;
+    import Storage;
+    import Bytes;
+    import Call;
+    import Address;
+
+    // constructor with owner and all global var
+    constructor(owner: address) {
+        _addressOwner:= owner;
+        _addressContract:= $THIS_ADDRESS;
+        _contractPaused:= false;
+    }
+
+    /// @dev Internal method to check if the contract is paused.
+    /// @dev Returns bool.
+    private checkContractPaused(): bool {
+        // check if contract is paused
+        if (_contractPaused) {
+            return true;
+        }
+        return false;
+    }
+
+
+    /// @dev Update the current token contract owner address to another address.
+    /// @param newOwner - Address of the new owner - address
+    public updateOwner(newOwner:address) {
+        // check is witness and is current owner
+        Runtime.expect(Runtime.isWitness(_addressOwner), "invalid witness");
+
+        // set new owner
+        _addressOwner:= newOwner;
+    }
+
+    public mintToken() {
+        // check if contract is active
+        Runtime.expect(this.checkContractPaused() != true, "DoYourTip smart contract is currently paused.");
+    }
+
+    /// @dev Add given address to the not burn whitelist.
+    /// @param from - Address from - address
+    /// @param addr - Address to be added to the whitelist
+    public addToWhitelist(from: address, addr: address) {
+        // check is witness and is current owner
+        Runtime.expect(Runtime.isWitness(_addressOwner), "invalid witness");
+        Runtime.expect(Runtime.isWitness(from), "from is an invalid witness");
+
+        local whitelistQty: number := _whitelistStorage.get(addr);
+
+        if(whitelistQty <= 0) {
+            _whitelistStorage.set(addr, 1);
+        }
+    }
+
+    /// @dev Remove given address to the not burn whitelist.
+    /// @param from - Address from - address
+    /// @param addr - Address to be removed from the whitelist
+    public removeFromWhitelist(from: address, addr: address) {
+        // check is witness and is current owner
+        Runtime.expect(Runtime.isWitness(_addressOwner), "invalid witness");
+        Runtime.expect(Runtime.isWitness(from), "from is an invalid witness");
+
+        local whitelistQty: number := _whitelistStorage.get(addr);
+
+        if(whitelistQty > 0) {
+            _whitelistStorage.remove(addr);
+        }
+    }
+
+    /// @dev onUpgrade trigger.
+    /// @param from - Address from - address
+    trigger onUpgrade(from: address) {
+        // check is witness and is current owner
+        Runtime.expect(Runtime.isWitness(_addressOwner), "invalid witness");
+    }
+
+    /// @dev onMigrate trigger.
+    /// @param from - Address from - address
+    /// @param to - Address to - address
+    trigger onMigrate(from:address, to:address) {
+        // check is current owner
+        if (from == _addressOwner) {
+            _addressOwner := to;
+        }
+    }
+
+    /// @dev onMint trigger.
+    /// @param from - Address from - address
+    /// @param from - Address to - address
+    /// @param from - Symbol - string
+    /// @param from - Amount - number
+    trigger onMint(from: address, to: address, symbol: string, amount: number) {
+        _swapStorage.set(Runtime.transactionHash(), 1);
+    }
+
+    /// @dev onSend trigger.
+    /// @param from - Address from - address
+    /// @param from - Address to - address
+    /// @param from - Symbol - string
+    /// @param from - Amount - number
+    trigger onSend(from: address, to: address, symbol: string, amount: number) {
+        //nothing to do here, burn take place at onReceive trigger...
+    }
+
+    /// @dev onReceive trigger.
+    /// @param from - Address from - address
+    /// @param from - Address to - address
+    /// @param from - Symbol - string
+    /// @param from - Amount - number
+    trigger onReceive(from: address, to: address, symbol: string, amount: number) {
+
+        local transferamt: number := amount;
+        local burnamt: number := 0;
+
+        local whitelistQtyFrom: number := _whitelistStorage.get(from);
+        local whitelistQtyTo: number := _whitelistStorage.get(to);
+        local whitelistQty: number := whitelistQtyFrom + whitelistQtyTo;
+        local isSwap: number := _swapStorage.get(Runtime.transactionHash());
+
+        if (from != to) {
+            if (whitelistQty <= 0) {
+                if(isSwap <= 0) {
+                    burnamt := transferamt / 50;
+                    Token.burn(to, symbol, burnamt);
+                    _swapStorage.set(Runtime.transactionHash(), 1);
+                }
+                else {
+                    _swapStorage.remove(Runtime.transactionHash());
+                }
+            }
+        }
+    }
+}
